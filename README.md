@@ -120,11 +120,13 @@ home_assistant:
   discovery: false
   discovery_prefix: homeassistant
   card_myenedis: false
+  hourly: false
 
 ###############
 ## Influx DB ##
 ###############
 #influxdb: 
+#  scheme: http    # or https
 #  host: MY_INFLUXDB_SERVER
 #  port: 8086
 #  token: MY_TOKEN
@@ -273,14 +275,45 @@ make start
 
 - Add **DJU18**
 - Add Postgres/MariaDB Connector
-- Add max power
+- [Add max power](https://github.com/m4dm4rtig4n/enedisgateway2mqtt/issues/66)
+- [Add range date](https://github.com/m4dm4rtig4n/enedisgateway2mqtt/issues/68)
 
 ## Change log:
+
+### [0.7.8] - 2021-11-XX
+
+- Add "wipe_influxdb" paramaters (drop meseaurement enedisgateway_daily & enedisgateway_detail)
+- Remove addresses parameters
+- Force to false refresh paramaters (refresh_addresses, refresh_contracts, wipe_cache, wipe_influxdb)
+- Add hourly consumption compatible with apexchart-card.
+
+*Exemple for hourly consumption :*
+
+```
+type: custom:apexcharts-card
+graph_span: 5d
+span:
+  start: day
+  offset: '-6d'
+apex_config:
+  dataLabels:
+    enabled: true
+series:
+  - entity: sensor.enedisgateway_XXXXXXXXXXXXXXXXXX_hourly
+    name: af
+    extend_to_end: false
+    data_generator: |
+      return entity.attributes.hourly.map((hourly, index) => {     
+                return [new Date(hourly).getTime(), entity.attributes.hourly_value[index]];
+              });
+
+```
+
 
 ### [0.7.7] - 2021-11-22
 
 *UPGRADE Procedure :*
-- 0.7.6 -> 0.7.7 : Wipe cache (rm enedisgateway.db) 
+- 0.7.6 -> 0.7.7 : Wipe influxdb database. 
 
 *Change Log :*
 - Fix [Null values don’t mean no values](https://github.com/m4dm4rtig4n/enedisgateway2mqtt/issues/45)

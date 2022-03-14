@@ -92,6 +92,12 @@ def log(msg, level="INFO "):
     if critical:
         quit()
 
+def is_json(myjson):
+  try:
+    json.loads(myjson)
+  except ValueError as e:
+    return False
+  return True
 
 def splitLog(msg):
     format_log = ""
@@ -142,8 +148,45 @@ def apiRequest(cur, con, pdl, type="POST", url=None, headers=None, data=None):
 
     log(f"Call API : {url}", "DEBUG")
     log(f"Data : {data}", "DEBUG")
-    retour = requests.request(type, url=f"{url}", timeout=240, headers=headers, data=data).json()
+    try:
+        retour = requests.request(type, url=f"{url}", timeout=240, headers=headers, data=data)
+
+        if retour.status_code != 200:
+            retour = {
+                "error_code": retour.status_code,
+                "description": retour.text
+            }
+        else:
+            if is_json(str(retour.text)):
+                retour = retour.json()
+            else:
+                retour = {
+                    "error_code": 500,
+                    "description": "Enedis return is not json"
+                }
+    except requests.exceptions.Timeout:
+        log(" !! Query Timeout !!")
+        retour = {
+            "error_code": "timeout",
+            "description": "Query Timeout"
+        }
+    except requests.exceptions.TooManyRedirects:
+        log(" !! Too Many Redirection !!")
+        retour = {
+            "error_code": "TooManyRedirects",
+            "description": "TooManyRedirects"
+        }
+    except requests.exceptions.RequestException as e:
+        log(" !! Critical error !!")
+        retour = {
+            "error_code": "RequestException",
+            "description": "RequestException",
+            "exception": e
+        }
+
     if "debug" in main.config and main.config["debug"] == True:
-        pprint(f"API Return :")
-        pprint(retour)
+        log(f"API Return :", "ERROR")
+        log(retour, "ERROR")
+
     return retour
+

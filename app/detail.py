@@ -128,8 +128,14 @@ def getDetail(headers, cur, con, client, pdl, pdl_config, mode="consumption", la
 
                 if offpeak_hours != []:
                     if price_hc != 0 and price_hp != 0:
-                        result[year][month]["measure_hp_euro"] = result[year][month]["measure_hp_wh"] / 1000 * price_hp
-                        result[year][month]["measure_hc_euro"] = result[year][month]["measure_hc_wh"] / 1000 * price_hc
+                        if result[year][month]["measure_hp_wh"] != 0:
+                            result[year][month]["measure_hp_euro"] = result[year][month]["measure_hp_wh"] / 1000 * price_hp
+                        else:
+                            result[year][month]["measure_hp_euro"] = 0
+                        if result[year][month]["measure_hc_wh"] != 0:
+                            result[year][month]["measure_hc_euro"] = result[year][month]["measure_hc_wh"] / 1000 * price_hc
+                        else:
+                            result[year][month]["measure_hc_euro"] = 0
                         result[year][month]["measure_hphc_euro"] = result[year][month]["measure_hp_euro"] + result[year][month]["measure_hc_euro"]
 
                     if price_base != 0 and price_hc != 0 and price_hp != 0 and measure_type != "BASE":
@@ -249,7 +255,6 @@ def detailBeetwen(headers, cur, con, url, pdl, pdl_config, mode, dateBegin, date
         else:
             f.log(f"Data is missing between {dateBegin} / {dateEnded}")
             f.log(f" => Load data from API")
-
             detail = f.apiRequest(cur, con, pdl, type="POST", url=f"{url}", headers=headers, data=json.dumps(data))
             if not "error_code" in detail:
                 meter_reading = detail['meter_reading']
@@ -284,6 +289,7 @@ def detailBeetwen(headers, cur, con, url, pdl, pdl_config, mode, dateBegin, date
                 f.log(f"  => Import {len(new_date)} entry")
 
             elif detail['error_code'] == 2:
+                pprint(detail)
                 f.log(f"Fetch data error detected beetween {dateBegin} / {dateEnded}", "ERROR")
                 f.log(f" => {detail['description']}", "ERROR")
                 # cur.execute(f"UPDATE {mode}_detail SET fail = {date_data['fail'] + 1} WHERE pdl = '{pdl}' and date = '{date}'")

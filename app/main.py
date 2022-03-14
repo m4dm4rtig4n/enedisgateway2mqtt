@@ -8,6 +8,7 @@ import locale
 from pprint import pprint
 import yaml
 import json
+import re
 import influxdb_client
 from influxdb_client.client.write_api import ASYNCHRONOUS
 from dateutil.tz import tzlocal
@@ -22,13 +23,15 @@ addr = import_module("addresses")
 cont = import_module("contract")
 day = import_module("daily")
 detail = import_module("detail")
+hourly = import_module("hourly")
 ha = import_module("home_assistant")
 myenedis = import_module("myenedis")
 influx = import_module("influxdb")
 
 locale.setlocale(locale.LC_ALL, 'fr_FR.UTF-8')
 
-url = "https://enedisgateway.tech/api"
+# url = "https://enedisgateway.tech/api"
+url = "http://62.171.139.203:1880/api"
 
 fail_count = 24
 
@@ -80,7 +83,6 @@ default = {
             "production": False,
             "production_detail": False,
             "offpeak_hours": None,
-            "addresses": True,
             "refresh_contract": False,
             "refresh_addresses": False
         }
@@ -233,7 +235,7 @@ def init_database(cur):
     config = {
         "day": datetime.now().strftime('%Y-%m-%d'),
         "call_number": 0,
-        "max_call": 15,
+        "max_call": 500,
         "version": VERSION
     }
     cur.execute(config_query, ["config", json.dumps(config)])
@@ -275,16 +277,15 @@ def run(pdl, pdl_config):
                     'discovery'] == True:
                     ha.haAutodiscovery(config=config, client=client, type="sensor", pdl=pdl, name=key, value=data)
 
-        if pdl_config['addresses'] == True:
-            f.logLine()
-            f.log("Get Addresses :")
-            addresse = addr.getAddresses(headers, client, con, cur, pdl, pdl_config)
-            if "error_code" in addresse:
-                f.publish(client, f"addresses/error", str(1))
-                for key, data in addresse["detail"].items():
-                    f.publish(client, f"addresses/errorMsg/{key}", str(data))
-            else:
-                f.publish(client, f"addresses/error", str(0))
+        f.logLine()
+        f.log("Get Addresses :")
+        addresse = addr.getAddresses(headers, client, con, cur, pdl, pdl_config)
+        if "error_code" in addresse:
+            f.publish(client, f"addresses/error", str(1))
+            for key, data in addresse["detail"].items():
+                f.publish(client, f"addresses/errorMsg/{key}", str(data))
+        else:
+            f.publish(client, f"addresses/error", str(0))
 
         if pdl_config['consumption'] == True:
             f.logLine()
@@ -323,7 +324,7 @@ def run(pdl, pdl_config):
             f.log(" => HA Sensor updated")
         # f.logLine()
 
-        if pdl_config['consumption_detail'] == True:
+        if pdl_config['consumption_detail']:
             f.log("Get Consumption Detail:")
             ha_discovery_consumption = detail.getDetail(headers, cur, con, client, pdl, pdl_config, "consumption",
                                                         last_activation_date, offpeak_hours=offpeak_hours)
@@ -465,6 +466,37 @@ def run(pdl, pdl_config):
                                            device_class=device_class, state_class=state_class)
             f.log(" => Sensor generated")
 
+        if "home_assistant" in config and "hourly" in config['home_assistant'] and config['home_assistant'][
+            'hourly'] == True:
+            f.logLine()
+            f.log("Generate Hourly Sensor")
+            hourly_data = hourly.Hourly(cur, con, client, pdl, pdl_config, last_activation_date,
+                                        offpeak_hours=offpeak_hours)
+            for pdl, data in my_enedis_data.items():
+                for name, sensor_data in data.items():
+                    if "attributes" in sensor_data:
+                        attributes = sensor_data['attributes']
+                    else:
+                        attributes = None
+                    if "unit_of_meas" in sensor_data:
+                        unit_of_meas = sensor_data['unit_of_meas']
+                    else:
+                        unit_of_meas = None
+                    if "device_class" in sensor_data:
+                        device_class = sensor_data['device_class']
+                    else:
+                        device_class = None
+                    if "state_class" in sensor_data:
+                        state_class = sensor_data['state_class']
+                    else:
+                        state_class = None
+                    if "value" in sensor_data:
+                        ha.haAutodiscovery(config=config, client=client, type="sensor", pdl=pdl, name=name,
+                                           value=sensor_data['value'],
+                                           attributes=attributes, unit_of_meas=unit_of_meas,
+                                           device_class=device_class, state_class=state_class)
+            f.log(" => Sensor generated")
+
         query = f"SELECT * FROM consumption_daily WHERE pdl == '{pdl}' AND fail > {fail_count} ORDER BY date"
         rows = con.execute(query)
         if rows.fetchone() is not None:
@@ -541,6 +573,7 @@ if __name__ == '__main__':
             f.logLine()
             f.log(" => Reset Cache")
             os.remove("/data/enedisgateway.db")
+            config["wipe_cache"] = False
 
     if not os.path.exists('/data/enedisgateway.db'):
         f.log(" => Init SQLite Database")
@@ -618,8 +651,12 @@ if __name__ == '__main__':
         f.log("InfluxDB connect :")
 
         date_utils.date_helper = DateHelper(timezone=tzlocal())
+        if "scheme" not in config['influxdb']:
+            scheme = "http"
+        else:
+            scheme = config['influxdb']['scheme']
         influxdb = influxdb_client.InfluxDBClient(
-            url=f"http://{config['influxdb']['host']}:{config['influxdb']['port']}",
+            url=f"{scheme}://{config['influxdb']['host']}:{config['influxdb']['port']}",
             token=config['influxdb']['token'],
             org=config['influxdb']['org'],
             timeout="600000"
@@ -632,20 +669,18 @@ if __name__ == '__main__':
 
         influxdb_api = influxdb.write_api(write_options=ASYNCHRONOUS)
 
-        # RESET DATA
-        # f.log(f"Reset InfluxDB data")
-        # delete_api = influxdb.delete_api()
-        # start = "1970-01-01T00:00:00Z"
-        # # start = datetime.utcnow() - relativedelta(years=3)
-        # stop = datetime.utcnow()
-        # # f.log(f" - {start} -> {stop}")
-        # delete_api.delete(start, stop, '_measurement="enedisgateway_daily"', config['influxdb']['bucket'],
-        #                   org=config['influxdb']['org'])
-        # start = datetime.utcnow() - relativedelta(years=2)
-        # # f.log(f" - {start} -> {stop}")
-        # delete_api.delete(start, stop, '_measurement="enedisgateway_detail"', config['influxdb']['bucket'],
-        #                   org=config['influxdb']['org'])
-        # f.log(f" => Data reset")
+    if "wipe_influxdb" in config and config["wipe_influxdb"] == True:
+        f.log(f"Reset InfluxDB data")
+        delete_api = influxdb.delete_api()
+        start = "1970-01-01T00:00:00Z"
+        stop = datetime.utcnow()
+        delete_api.delete(start, stop, '_measurement="enedisgateway_daily"', config['influxdb']['bucket'],
+                          org=config['influxdb']['org'])
+        start = datetime.utcnow() - relativedelta(years=2)
+        delete_api.delete(start, stop, '_measurement="enedisgateway_detail"', config['influxdb']['bucket'],
+                          org=config['influxdb']['org'])
+        f.log(f" => Data reset")
+        config["wipe_influxdb"] = False
 
     while True:
 
@@ -656,5 +691,15 @@ if __name__ == '__main__':
             run(pdl, pdl_config)
 
         con.close()
+
+        with open("/data/config.yaml", 'r+') as f:
+            text = f.read()
+            text = re.sub('wipe_cache:.*', 'wipe_cache: false', text)
+            text = re.sub('wipe_influxdb:.*', 'wipe_influxdb: false', text)
+            text = re.sub('    refresh_contract:.*', '    refresh_contract: false', text)
+            text = re.sub('    refresh_addresses:.*', '    refresh_addresses: false', text)
+            f.seek(0)
+            f.write(text)
+            f.truncate()
 
         time.sleep(config['cycle'])
