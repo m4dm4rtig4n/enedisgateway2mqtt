@@ -15,7 +15,7 @@ date_format = "%Y-%m-%d %H:%M:%S"
 
 def getDetail(headers, cur, con, client, pdl, pdl_config, mode="consumption", last_activation_date=datetime.utcnow(), measure_total=None, offpeak_hours=[]):
 
-    max_days = 730
+    max_days = pdl_config['max_detail_days']
     max_days_per_demand = 7
     max_days_date = datetime.utcnow() + relativedelta(days=-max_days)
     price_base = pdl_config['consumption_price_base']
@@ -303,24 +303,26 @@ def detailBeetwen(headers, cur, con, url, pdl, pdl_config, mode, dateBegin, date
 
 
 def checkHistoryDetail(cur, con, pdl, mode, dateBegin, dateEnded):
-
-    # FORCE THIS WEEK
+    # Run different query if there is data for 'today', to avoid needless runs/connections when checking history
     if datetime.utcnow().strftime('%Y-%m-%d') == dateEnded.strftime('%Y-%m-%d'):
+        #result = {
+        #    "missing_data": True
+        #}
+        f.log(f"Run today with dateEnded: {dateEnded}")
+        query = f"SELECT * FROM {mode}_detail WHERE pdl = '{pdl}' AND date = '{dateEnded}'"    
+    else:
+        query = f"SELECT * FROM {mode}_detail WHERE pdl = '{pdl}' AND date BETWEEN '{dateBegin}' AND '{dateEnded}' ORDER BY date"
+    
+    cur.execute(query)
+    query_result = cur.fetchall()
+    f.log(f"Q: {query}", "DEBUG")
+    # if len(query_result) < 160:
+    if not query_result:
         result = {
             "missing_data": True
         }
     else:
-        # CHECK CURRENT DATA
-        query = f"SELECT * FROM {mode}_detail WHERE pdl = '{pdl}' AND date BETWEEN '{dateBegin}' AND '{dateEnded}' ORDER BY date"
-        cur.execute(query)
-        query_result = cur.fetchall()
-        # if len(query_result) < 160:
-        if not query_result:
-            result = {
-                "missing_data": True
-            }
-        else:
-            result = {
-                "missing_data": False
-            }
+        result = {
+            "missing_data": False
+        }
     return result
